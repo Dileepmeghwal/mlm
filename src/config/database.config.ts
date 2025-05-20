@@ -1,7 +1,8 @@
 import mongoose, { ConnectOptions } from "mongoose";
 
 const curr="mongodb+srv://<db_username>:<db_password>@ml.qkuo7.mongodb.net/?retryWrites=true&w=majority&appName=ML"
-const uri = "mongodb+srv://mluser:mluser@ml.qkuo7.mongodb.net/ML?retryWrites=true&w=majority&appName=ML";
+//const uri = "mongodb://localhost:27017/mlm?retryWrites=true&w=majority&appName=ML";
+const uri='mongodb+srv://admin:mlm%231%40dtfindia%24%23000%23%24@cluster0.rilg88z.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0'
 const options: any = {
     useNewUrlParser: true,
     useUnifiedTopology: true,
