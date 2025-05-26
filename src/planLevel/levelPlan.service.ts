@@ -24,7 +24,7 @@ export class LevelPlanService {
 
   static async getLevelPlans(planId: string | mongoose.Types.ObjectId) {
     // Get Level Plans
-    const levels = await LevelPlan.find({ plan: planId }).populate("plan");
+    const levels = await LevelPlan.find({ plan: planId }).populate("plan").sort({createdAt:1});
     return levels;
   }
   static async updateLevelPlan(body: UpdatePlanLevelDto) {

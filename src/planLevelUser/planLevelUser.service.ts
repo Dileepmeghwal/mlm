@@ -39,7 +39,8 @@ export class PlanLevelUserService {
         },
         select: "levelName _id plan levelBonusDuration bonusTeam",
       })
-      .populate("user", "email _id first_name last_name");
+      .populate("user", "email _id first_name last_name")
+      .sort({ createdAt: 1 });
   }
 
   static async getByUserAndLevel(
