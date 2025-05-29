@@ -414,7 +414,7 @@ export async function withdrawAmountCostumer(
     );
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
-    if(user.bankAC?.length <= 10 || user.upi?.length <= 10){
+    if(!user.bankAC?.length || user.bankAC?.length <= 10  || !user.upi?.length ){
       return res.status(404).json({
         message: "please fill bank details before withdrawing.",
       });
