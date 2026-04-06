@@ -10,6 +10,7 @@ import NotificationRouter from "./notification/notification.routes";
 import AdminRouter from "./admin/admin.routes";
 import VerifyUserRouter from "./verifyUser/verifyUser.routes";
 import WithdrawRouter from "./withdraw/withdraw.routes";
+import PasswordResetRouter from "./password-reset/passwordReset.routes";
 
 export default function useApi(app: Application) {
   const router = Router();
@@ -27,4 +28,5 @@ export default function useApi(app: Application) {
   app.use("/admin", AdminRouter);
   app.use("/validate", VerifyUserRouter);
   app.use("/admin-withdraw", WithdrawRouter);
+  app.use("/password-reset", PasswordResetRouter);
 }

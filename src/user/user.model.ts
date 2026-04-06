@@ -105,6 +105,24 @@ const UserSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+  // Password reset fields
+  resetToken: {
+    type: String,
+    default: null,
+  },
+  resetTokenExpiry: {
+    type: Date,
+    default: null,
+  },
+  passwordResetAttempts: {
+    type: Number,
+    default: 0,
+  },
+  passwordResetLockUntil: {
+    type: Date,
+    default: null,
+    required: false,
+  },
 });
 UserSchema.plugin(AutoIncrementID, { field: "userId" });
 

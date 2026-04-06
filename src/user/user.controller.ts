@@ -1,4 +1,4 @@
-import { Request, Response, Router } from "express";
+import { Request, Response } from "express";
 import User from "./user.model";
 import { PlanPinService } from "../planPin/planPin.service";
 import { generateToken } from "../middleware/jwt";
@@ -99,45 +99,52 @@ export async function VerifyPin(req: Request, res: Response): Promise<any> {
   return res.json({ message: "Pin verified successfully", user, token });
 }
 
-export function loginController(req: any, res: any) {
-  const body = req.body;
-  if (!body.email || !body.password) {
-    return res.status(400).send({
-      message: "Please fill all the required fields",
+export async function loginController(req: any, res: any) {
+  try {
+    const body = req.body;
+    if (!body.email || !body.password) {
+      return res.status(400).send({
+        message: "Please fill all the required fields",
+      });
+    }
+
+    // Find user by email
+    const data = await User.findOne({ email: body.email }).lean();
+
+    if (!data) {
+      return res.status(404).send({
+        message: "User not found",
+      });
+    }
+
+    const passwordIsValid = bcrypt.compareSync(body.password, data.password);
+    if (!passwordIsValid) {
+      return res.status(401).send({
+        message: "Invalid Password",
+      });
+    }
+
+    if (data.isBlock) {
+      return res.status(401).send({
+        message: "User is blocked",
+      });
+    }
+
+    const token = generateToken({
+      email: data.email,
+      _id: data._id,
+      referredBy: data.referred_by,
+      verified: data.isVerified,
+      type: data.type || "USER",
+    });
+
+    res.send({ user: data, token, message: "User logged in successfully" });
+  } catch (err: any) {
+    console.error("Login error:", err);
+    res.status(500).send({
+      message: err.message || "Some error occurred while login",
     });
   }
-  User.findOne({ email: body.email })
-
-    .then((data) => {
-      if (!data)
-        return res.status(404).send({
-          message: "User not found",
-        });
-
-      const passwordIsValid = bcrypt.compareSync(body.password, data.password);
-      if (!passwordIsValid)
-        return res.status(401).send({
-          message: "Invalid Password",
-        });
-      if (data.isBlock)
-        return res.status(401).send({
-          message: "User is blocked",
-        });
-
-      const token = generateToken({
-        email: data.email,
-        _id: data._id,
-        referredBy: data.referred_by,
-        verified: data.isVerified,
-        type: data.type || "USER",
-      });
-      res.send({ user: data, token, message: "User logged in successfully" });
-    })
-    .catch((err) => {
-      res.status(500).send({
-        message: err.message || "Some error occurred while login",
-      });
-    });
 }
 
 export async function getUserById(req: Request, res: Response): Promise<any> {

@@ -21,15 +21,20 @@ app.use(Express.static("public"));
 
 //Starting the server
 async function startServer() {
-  //Adding a route
-  useApi(app);
-  // connecting Database
-  await databaseConnect();
-  const port = process?.env?.PORT || 8000;
-  app.listen(port, () => {
-    console.log(`Server started on http://localhost:${port}`);
-  });
-  return app;
+  try {
+    //Adding a route
+    useApi(app);
+    // connecting Database
+    await databaseConnect();
+    const port = process?.env?.PORT || 8000;
+    app.listen(port, () => {
+      console.log(`Server started on http://localhost:${port}`);
+    });
+    return app;
+  } catch (error) {
+    console.error("Failed to start server:", error);
+    process.exit(1);
+  }
 }
 
 startServer();
