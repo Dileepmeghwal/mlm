@@ -1,3 +1,6 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import Express, { Application, Request, Response } from "express";
 import databaseConnect from "./config/database.config";
 import useApi from "./routes";

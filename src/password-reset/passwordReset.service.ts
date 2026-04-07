@@ -9,7 +9,7 @@ export class PasswordResetService {
    * Generate a secure reset token and save to database
    * Token is valid for 15 minutes
    */
-  static async generateResetToken(email: string): Promise<{ success: boolean; message: string; token?: string }> {
+  static async generateResetToken(email: string): Promise<{ success: boolean; message: string }> {
     try {
       // Check rate limiting (max 3 attempts per hour)
       const user = await User.findOne({ email });
@@ -61,13 +61,27 @@ export class PasswordResetService {
       await user.save();
 
       // Send email with reset link (token is unhashed for email link)
-      const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}&email=${encodeURIComponent(email)}`;
-      await sendResetPasswordEmail(email, resetLink, user.first_name);
+      const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+      const resetLink = `${frontendUrl}/reset-password?token=${resetToken}&email=${encodeURIComponent(email)}`;
+
+      try {
+        await sendResetPasswordEmail(email, resetLink, user.first_name);
+      } catch (emailError) {
+        // Clear the token if email fails so user can retry immediately
+        user.resetToken = null as any;
+        user.resetTokenExpiry = null as any;
+        user.passwordResetAttempts = Math.max(0, (user.passwordResetAttempts || 1) - 1);
+        await user.save();
+        console.error('Failed to send reset email:', emailError);
+        return {
+          success: false,
+          message: 'Failed to send reset email. Please try again later.'
+        };
+      }
 
       return {
         success: true,
-        message: 'If this email exists, a reset link has been sent.',
-        token: resetToken // For testing only - remove in production
+        message: 'If this email exists, a reset link has been sent.'
       };
     } catch (error) {
       console.error('Error generating reset token:', error);

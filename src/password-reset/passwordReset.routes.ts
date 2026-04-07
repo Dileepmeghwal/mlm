@@ -23,9 +23,11 @@ router.post(
 /**
  * POST /api/password-reset/verify-token
  * Verify reset token before showing password form
+ * Rate limited to 10 requests per 15 minutes per IP
  */
 router.post(
   '/verify-token',
+  rateLimitMiddleware('verify-token', 10, 15 * 60),
   PasswordResetController.verifyToken
 );
 
@@ -43,9 +45,11 @@ router.post(
 /**
  * GET /api/password-reset/check-token
  * Check if reset token is still valid (query params: token, email)
+ * Rate limited to 10 requests per 15 minutes per IP
  */
 router.get(
   '/check-token',
+  rateLimitMiddleware('check-token', 10, 15 * 60),
   PasswordResetController.checkToken
 );
 
