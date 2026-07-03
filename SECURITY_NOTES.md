@@ -9,7 +9,7 @@
 **Issue:**
 ```typescript
 // ❌ EXPOSED - Database credentials hardcoded
-const uri='mongodb+srv://admin:mlm%231%40dtfindia%24%23000%23%24@cluster0.rilg88z.mongodb.net/mlm'
+const uri='mongodb+srv://admin:<REDACTED-PASSWORD>@<REDACTED-CLUSTER>.mongodb.net/mlm'
 ```
 
 **Fix:**
@@ -35,7 +35,7 @@ const uri = process.env.MONGODB_URI || 'fallback_uri_if_needed';
 // ❌ EXPOSED - Email credentials hardcoded
 auth: {
   user: "support@dtfindia.org",
-  pass: "1@Dtfindia#harish",
+  pass: "<REDACTED-EMAIL-PASSWORD>",
 }
 ```
 

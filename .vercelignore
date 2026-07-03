@@ -1,0 +1,5 @@
+local-dev.ts
+test-connection.ts
+src/**/__tests__
+*.md
+dist

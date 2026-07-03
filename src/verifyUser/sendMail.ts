@@ -1,20 +1,27 @@
 import nodemailer from "nodemailer";
 
+function createMailTransporter() {
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASSWORD;
+  if (!user || !pass) {
+    throw new Error(
+      "SMTP_USER / SMTP_PASSWORD are not set. Configure them in your .env file."
+    );
+  }
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST || "smtpout.secureserver.net",
+    port: Number(process.env.SMTP_PORT) || 465,
+    auth: { user, pass },
+  });
+}
+
 async function sendmail(email: string, otp: string): Promise<void> {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(email)) {
     throw new Error("Invalid email address");
   }
 
-  const transporter = nodemailer.createTransport({
-    host: "smtpout.secureserver.net",
-    port: 465,
-    // secure: false,
-    auth: {
-      user: "support@dtfindia.org",
-      pass: "1@Dtfindia#harish",
-    },
-  });
+  const transporter = createMailTransporter();
 
   
   // Verify the connection configuration
@@ -53,14 +60,7 @@ async function sendResetPasswordEmail(
     throw new Error("Invalid email address");
   }
 
-  const transporter = nodemailer.createTransport({
-    host: "smtpout.secureserver.net",
-    port: 465,
-    auth: {
-      user: process.env.SMTP_USER || "support@dtfindia.org",
-      pass: process.env.SMTP_PASSWORD || "1@Dtfindia#harish",
-    },
-  });
+  const transporter = createMailTransporter();
 
   const resetLinkExpiresIn = "15 minutes"; // Match the token expiry time
   const currentYear = new Date().getFullYear();

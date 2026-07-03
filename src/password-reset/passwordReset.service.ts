@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import User from '../user/user.model';
 import { sendResetPasswordEmail } from '../verifyUser/sendMail';
 import { IUser } from '../user/user.interface';

@@ -6,6 +6,8 @@
     "rootDir": "./",
     "strict": true,
     "esModuleInterop": true,
+    "skipLibCheck": true,
     "typeRoots": ["./types", "./node_modules/@types"]
-  }
+  },
+  "exclude": ["node_modules", "dist", "**/__tests__/**", "local-dev.ts"]
 }

@@ -1,11 +1,25 @@
 import Express from "express";
-import jwt from "jsonwebtoken";
+import jwt, { SignOptions } from "jsonwebtoken";
+
+function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error(
+      "JWT_SECRET is missing or too weak (min 32 chars). Set a strong value in your .env file."
+    );
+  }
+  return secret;
+}
 
 export function generateToken(payload: any) {
-  return jwt.sign(payload, "test@123");
+  const options: SignOptions = {
+    algorithm: "HS256",
+    expiresIn: (process.env.JWT_EXPIRY || "7d") as SignOptions["expiresIn"],
+  };
+  return jwt.sign(payload, getJwtSecret(), options);
 }
 function verifyToken(token: string) {
-  return jwt.verify(token, "test@123");
+  return jwt.verify(token, getJwtSecret(), { algorithms: ["HS256"] });
 }
 
 export function authMiddleware(

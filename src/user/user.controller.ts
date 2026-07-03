@@ -5,7 +5,7 @@ import { generateToken } from "../middleware/jwt";
 import { UserPlanService } from "../planUser/userPlan.service";
 import { PlanLevelUserService } from "../planLevelUser/planLevelUser.service";
 import { referFlowService } from "../referredFlow/referrefFlow.service";
-import * as bcrypt from "bcrypt";
+import * as bcrypt from "bcryptjs";
 import { WithdrawService } from "../withdraw/withdraw.service";
 import { NotificationService } from "../notification/notification.service";
 
@@ -40,7 +40,9 @@ export const signupController = async (req: any, res: any) => {
         verified: false,
         type: "USER",
       });
-      res.json({ message: "User created", user: data, token });
+      const safeUser = data.toObject();
+      delete (safeUser as any).password;
+      res.json({ message: "User created", user: safeUser, token });
     })
     .catch((err) => {
       res.status(500).send({
@@ -138,6 +140,7 @@ export async function loginController(req: any, res: any) {
       type: data.type || "USER",
     });
 
+    delete (data as any).password;
     res.send({ user: data, token, message: "User logged in successfully" });
   } catch (err: any) {
     console.error("Login error:", err);
@@ -151,7 +154,11 @@ export async function getUserById(req: Request, res: Response): Promise<any> {
   try {
     const { id } = req.params;
     if (!id) return res.status(400).json({ message: "Id is required" });
-    const user = await User.find({ userId: id }).select("-password");
+    // This lookup is used to resolve a user by their display id (e.g. for PIN
+    // transfer). Return only identity fields — never financial/KYC data of
+    // another user, regardless of who is asking.
+    const projection = "userId first_name last_name email type isVerified isBlock";
+    const user = await User.find({ userId: id }).select(projection);
     if (!user.length)
       return res.status(404).json({ message: "User not found" });
     return res.json(user[0]);
@@ -165,6 +172,11 @@ export async function getById(req: Request, res: Response): Promise<any> {
   try {
     const { id } = req.params;
     if (!id) return res.status(400).json({ message: "Id is required" });
+    // A user may only read their own full record; admins may read anyone.
+    const isAdmin = req.user?.type === "ADMIN";
+    if (!isAdmin && String(req.user?._id) !== String(id)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
     const user = await User.findById(id).select("-password");
     if (!user) return res.status(404).json({ message: "User not found" });
     return res.json(user);
@@ -247,13 +259,34 @@ export async function blockUnblock(req: Request, res: Response): Promise<any> {
   return res.json({ message: "User blocked successfully" });
 }
 
+// Fields a user is allowed to change about their own account. Sensitive fields
+// (type, wallet, isVerified, isBlock, referred_by, pin, password, reset tokens)
+// are deliberately excluded so a user can never escalate privileges or credit
+// themselves money via mass assignment.
+const USER_EDITABLE_FIELDS = [
+  "first_name",
+  "last_name",
+  "mobile_number",
+  "dob",
+  "adress1",
+  "adress2",
+  "pan",
+  "adhaar",
+  "upi",
+  "bankAC",
+  "ifsc",
+  "bankName",
+];
+
 export async function updateUser(req: Request, res: Response): Promise<any> {
   const userId = req.user?._id;
   const body = req.body;
   if (!userId) return res.status(400).json({ message: "User Id is required" });
   const user = await User.findById(userId);
   if (!user) return res.status(404).json({ message: "User not found" });
-  Object.assign(user, body);
+  for (const key of USER_EDITABLE_FIELDS) {
+    if (key in body) (user as any)[key] = body[key];
+  }
   await user.save();
   return res.json({ message: "User updated successfully" });
 }
@@ -338,8 +371,12 @@ export async function updateUserByAdmin(
       return res.status(400).json({ message: "User Id is required" });
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
-    delete body.userId;
-    Object.assign(user, body);
+    // Even an admin edits only profile/KYC fields here. Changing account type,
+    // wallet balance, verification status, or the referral link is NOT allowed
+    // through this endpoint (block/unblock has its own dedicated route).
+    for (const key of USER_EDITABLE_FIELDS) {
+      if (key in body) (user as any)[key] = body[key];
+    }
     await user.save();
     return res.json({ message: "User updated successfully" });
   } catch (err: any) {
@@ -378,13 +415,23 @@ export async function withdrawAmount(
 ): Promise<any> {
   const body: WithdrawAmount = req.body;
   try {
+    const amount = Number(body.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ message: "Invalid withdrawal amount" });
+    }
     const withdraws = await WithdrawService.calculateWithDraws(
       body.userId,
-      body.amount.toString()
+      String(amount)
     );
     const user = await User.findById(body.userId);
     if (!user) return res.status(404).json({ message: "User not found" });
-    if (user.wallet < withdraws.total)
+    // Atomically deduct only if the balance is sufficient (guards against
+    // concurrent withdrawals draining more than the wallet holds).
+    const deducted = await User.updateOne(
+      { _id: body.userId, wallet: { $gte: withdraws.total } },
+      { $inc: { wallet: -withdraws.total } }
+    );
+    if (deducted.modifiedCount === 0)
       return res.status(400).json({ message: "Insufficient balance" });
     await WithdrawService.createWithdraw({
       user: body.userId,
@@ -393,8 +440,6 @@ export async function withdrawAmount(
       withdrawAmount: withdraws.withdrawAmount,
       percentage: withdraws.percentage,
     });
-    user.wallet -= withdraws.total;
-    await user.save();
     await NotificationService.create({
       user: body.userId,
       message: `You have successfully withdrawn ${withdraws.total} from your account`,
@@ -415,9 +460,13 @@ export async function withdrawAmountCostumer(
   const body: WithdrawAmount = req.body;
   const userId = req.user._id;
   try {
+    const amount = Number(body.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ message: "Invalid withdrawal amount" });
+    }
     const withdraws = await WithdrawService.calculateWithDraws(
       userId,
-      body.amount.toString()
+      String(amount)
     );
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
@@ -426,7 +475,13 @@ export async function withdrawAmountCostumer(
         message: "please fill bank details before withdrawing.",
       });
     }
-    if (user.wallet < withdraws.total)
+    // Atomically deduct only if the balance is sufficient (guards against
+    // concurrent withdrawals draining more than the wallet holds).
+    const deducted = await User.updateOne(
+      { _id: userId, wallet: { $gte: withdraws.total } },
+      { $inc: { wallet: -withdraws.total } }
+    );
+    if (deducted.modifiedCount === 0)
       return res.status(400).json({ message: "Insufficient balance" });
     await WithdrawService.createWithdraw({
       user: userId,
@@ -435,10 +490,8 @@ export async function withdrawAmountCostumer(
       withdrawAmount: withdraws.withdrawAmount,
       percentage: withdraws.percentage,
     });
-    user.wallet -= withdraws.total;
-    await user.save();
     await NotificationService.create({
-      user: body.userId,
+      user: userId,
       message: `You have successfully added a withdrawal of ₹${withdraws.total}. Admin will approve it soon`,
       type: "DEBIT",
     });

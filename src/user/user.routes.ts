@@ -36,17 +36,17 @@ UserRouter.post(
 );
 UserRouter.get("/get-user/:id", authMiddleware, getUserById);
 UserRouter.get("/get-by-id/:id", authMiddleware, getById);
-UserRouter.post("/admin/edit-profile/", authMiddleware, updateUserByAdmin);
+UserRouter.post("/admin/edit-profile/", authMiddleware, checkAdmin, updateUserByAdmin);
 UserRouter.get("/token", authMiddleware, verifyToken);
 UserRouter.get("/referrals", authMiddleware, getUserLevelLogs);
-UserRouter.get("/get-list", getUserList);
-UserRouter.post("/block-unblock", authMiddleware, blockUnblock);
+UserRouter.get("/get-list", authMiddleware, checkAdmin, getUserList);
+UserRouter.post("/block-unblock", authMiddleware, checkAdmin, blockUnblock);
 UserRouter.post("/update", authMiddleware, updateUser);
 UserRouter.get("/calculate-amount", authMiddleware, calculateUserWithdraws);
 
 // UserRouter.post("/withdraw", authMiddleware, checkAdmin, withdrawAmount);
 UserRouter.post("/withdraw", authMiddleware, withdrawAmountCostumer);
-UserRouter.get("/transaction-history/:id", getUserTransactions);
+UserRouter.get("/transaction-history/:id", authMiddleware, getUserTransactions);
 UserRouter.get("/", (req: Request, res: Response) => {
   res.json({ message: "Hello World" });
 });

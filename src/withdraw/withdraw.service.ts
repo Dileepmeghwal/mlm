@@ -99,6 +99,9 @@ export class WithdrawService {
     amountString: string
   ) {
     const amount = parseInt(amountString);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error("Invalid withdrawal amount");
+    }
     if (amount < 1000) {
       const withdraws = await this.getUserWithdraws(userId);
       if (!withdraws.length) {
