@@ -57,6 +57,10 @@ async function main() {
   // override variables that are already set, so this local URI wins over .env.
   process.env.MONGODB_URI = uri;
   process.env.NODE_ENV = process.env.NODE_ENV || "development";
+  // Local testing hits auth endpoints many times — don't throttle it.
+  process.env.LOGIN_RATE_LIMIT_MAX = process.env.LOGIN_RATE_LIMIT_MAX || "100000";
+  process.env.SIGNUP_RATE_LIMIT_MAX = process.env.SIGNUP_RATE_LIMIT_MAX || "100000";
+  process.env.ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS || "http://localhost:5173,http://localhost:5174";
   // Ensure a JWT secret exists even if .env is missing one.
   if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
     process.env.JWT_SECRET = "local-dev-only-secret-change-me-0123456789abcd";

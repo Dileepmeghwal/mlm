@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import crypto from "crypto";
 import PlanService from "../plan/plan.service";
 import { CreatePlanPin, UpdatePlanPin } from "./planPin.dto";
 import PlanPin from "./planPin.model";
@@ -15,10 +16,23 @@ export class PlanPinService {
 
     let count = Number(body.count);
     while (count > 0) {
-      body.pin = Math.floor(100000 + Math.random() * 900000).toString();
-      const p = new PlanPin(body);
-      p.pin = Math.floor(100000 + Math.random() * 900000).toString();
-      await p.save();
+      // Cryptographically-secure, unpredictable PIN (these represent paid
+      // enrollments — must not be guessable). Retry on the rare unique-index
+      // collision.
+      let saved = false;
+      for (let attempt = 0; attempt < 5 && !saved; attempt++) {
+        try {
+          const p = new PlanPin({
+            ...body,
+            pin: crypto.randomInt(100000, 1000000).toString(),
+          });
+          await p.save();
+          saved = true;
+        } catch (err: any) {
+          if (err?.code !== 11000) throw err; // not a duplicate-key error
+        }
+      }
+      if (!saved) throw new Error("Could not generate a unique PIN, please retry");
       count--;
     }
   }

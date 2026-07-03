@@ -13,7 +13,12 @@ const ReferFlow = new referFlowService();
 
 export const signupController = async (req: any, res: any) => {
   const body = req.body;
-  if (!body.email || !body.password || !body.first_name || !body.last_name) {
+  if (
+    typeof body.email !== "string" ||
+    typeof body.password !== "string" ||
+    typeof body.first_name !== "string" ||
+    typeof body.last_name !== "string"
+  ) {
     return res.status(400).send({
       message: "Please fill all the required fields",
     });
@@ -104,7 +109,12 @@ export async function VerifyPin(req: Request, res: Response): Promise<any> {
 export async function loginController(req: any, res: any) {
   try {
     const body = req.body;
-    if (!body.email || !body.password) {
+    if (
+      typeof body.email !== "string" ||
+      typeof body.password !== "string" ||
+      !body.email ||
+      !body.password
+    ) {
       return res.status(400).send({
         message: "Please fill all the required fields",
       });

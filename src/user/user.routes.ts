@@ -21,11 +21,17 @@ import {
 } from "./user.controller";
 import { Request, Response } from "express";
 import { authMiddleware, checkAdmin } from "../middleware/jwt";
+import { rateLimitMiddleware } from "../middleware/rateLimiter";
 
 const UserRouter = Router();
 
-UserRouter.post("/signup", signupController);
-UserRouter.post("/login", loginController);
+// Throttle auth endpoints to slow down brute-force / credential-stuffing.
+// Configurable via env (local dev bumps this so tests aren't throttled).
+const LOGIN_MAX = Number(process.env.LOGIN_RATE_LIMIT_MAX) || 10;
+const SIGNUP_MAX = Number(process.env.SIGNUP_RATE_LIMIT_MAX) || 10;
+
+UserRouter.post("/signup", rateLimitMiddleware("signup", SIGNUP_MAX, 15 * 60), signupController);
+UserRouter.post("/login", rateLimitMiddleware("login", LOGIN_MAX, 15 * 60), loginController);
 UserRouter.post("/verify", authMiddleware, VerifyPin);
 UserRouter.get("/profile", authMiddleware, getProfile);
 UserRouter.post("/edit-profile/general", authMiddleware, updateUserProfile);

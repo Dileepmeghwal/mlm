@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+import crypto from "crypto";
 import VerifyUser from "./verifyUser.mode";
 import { sendmail } from "./sendMail";
 
@@ -19,7 +19,7 @@ export class VerifyUserService {
   }
 
   static async createOTP(email: string) {
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otp = crypto.randomInt(100000, 1000000).toString();
     await VerifyUser.create({ email, otp });
     await sendmail(email, otp);
     return otp;

@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import User from "../user/user.model";
+import PlanLevelUser from "../planLevelUser/planLevelUser.model";
 import { LevelPlanService } from "../planLevel/levelPlan.service";
 import { PlanLevelUserService } from "../planLevelUser/planLevelUser.service";
 import ReferFlow from "./referFlow.model";
@@ -34,32 +35,51 @@ export class referFlowService {
         console.log("Plan level not found for user: ", referred_by);
         continue;
       }
-      planLevelUser.creditAmount += level.levelCreditAmount;
-      planLevelUser.count += 1;
-      referredData.wallet = referredData?.wallet
-        ? referredData.wallet + level.levelCreditAmount
-        : level.levelCreditAmount;
 
+      // Atomically credit the level commission and bump the referral count.
+      // Using $inc (instead of read-modify-write + save) prevents lost updates
+      // when several downline members enroll under the same sponsor at once.
+      const updatedPLU = await PlanLevelUser.findByIdAndUpdate(
+        planLevelUser._id,
+        { $inc: { creditAmount: level.levelCreditAmount, count: 1 } },
+        { new: true }
+      );
+      await User.updateOne(
+        { _id: referred_by },
+        { $inc: { wallet: level.levelCreditAmount } }
+      );
+
+      // One-time team bonus: award it atomically & idempotently. The filter
+      // `bonusAmount: 0` guarantees only one concurrent caller wins, so the
+      // bonus can never be paid twice even under a race.
       if (
-        planLevelUser.count >= level.bonusTeam &&
-        planLevelUser.bonusAmount === 0
+        updatedPLU &&
+        updatedPLU.count >= level.bonusTeam &&
+        updatedPLU.bonusAmount === 0
       ) {
-        const expireDate = moment(planLevelUser.createdAt).add(
+        const expireDate = moment(updatedPLU.createdAt).add(
           level?.levelBonusDuration?.value || 1,
           level?.levelBonusDuration?.unit || "days"
         );
         if (expireDate.isSameOrAfter(moment())) {
-          planLevelUser.bonusAmount = level.levelBonusAmount;
-          referredData.wallet += level.levelBonusAmount;
-          NotificationService.create({
-            user: referred_by,
-            message: `You have been credited with ₹${level.levelBonusAmount} as a bonus for level ${level.levelName} for referring ${planLevelUser.count} users.`,
-          })
+          const awarded = await PlanLevelUser.findOneAndUpdate(
+            { _id: updatedPLU._id, bonusAmount: 0 },
+            { $set: { bonusAmount: level.levelBonusAmount } },
+            { new: true }
+          );
+          if (awarded) {
+            await User.updateOne(
+              { _id: referred_by },
+              { $inc: { wallet: level.levelBonusAmount } }
+            );
+            NotificationService.create({
+              user: referred_by,
+              message: `You have been credited with ₹${level.levelBonusAmount} as a bonus for level ${level.levelName} for referring ${updatedPLU.count} users.`,
+            });
+          }
         }
       }
 
-      await planLevelUser.save();
-      await referredData.save();
       const referredLog = new ReferFlow({
         user: referred_by,
         referredUser: userData?._id,

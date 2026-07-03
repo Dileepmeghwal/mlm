@@ -8,14 +8,64 @@ const app: Application = Express();
 
 //Applying middleware
 app.use(Express.json());
-app.use(cors());
-app.use(function (req, res, next) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.setHeader("Access-Control-Allow-Credentials", "true");
+
+// --- CORS lockdown -------------------------------------------------------
+// Only allow the configured frontend origin(s). Set ALLOWED_ORIGINS (comma
+// separated) in the environment for production; localhost is allowed by
+// default for local dev. Requests without an Origin header (curl, mobile,
+// server-to-server) are allowed through.
+const allowedOrigins = (
+  process.env.ALLOWED_ORIGINS ||
+  [process.env.FRONTEND_URL, "http://localhost:5173", "http://localhost:5174"]
+    .filter(Boolean)
+    .join(",")
+)
+  .split(",")
+  .map((s) => s.trim().replace(/\/+$/, ""))
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
+      if (!origin) return cb(null, true);
+      return cb(null, allowedOrigins.includes(origin.replace(/\/+$/, "")));
+    },
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+  })
+);
+
+// --- Basic security headers ---------------------------------------------
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("X-XSS-Protection", "0");
   next();
 });
+
+// --- NoSQL injection guard ----------------------------------------------
+// Strip any keys that look like Mongo operators ($...) or contain dots from
+// request payloads, so a client can't smuggle query operators into a filter
+// (e.g. { "email": { "$gt": "" } } to bypass auth).
+function sanitizeMongo(value: any): void {
+  if (!value || typeof value !== "object") return;
+  for (const key of Object.keys(value)) {
+    if (key.startsWith("$") || key.includes(".")) {
+      delete value[key];
+    } else {
+      sanitizeMongo(value[key]);
+    }
+  }
+}
+app.use((req: Request, _res: Response, next) => {
+  sanitizeMongo(req.body);
+  sanitizeMongo(req.query);
+  sanitizeMongo(req.params);
+  next();
+});
+
 app.use(Express.static("public"));
 
 // Ensure a database connection exists before handling any request. On
