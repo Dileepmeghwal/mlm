@@ -1,96 +1,129 @@
 import { Request, Response, NextFunction } from 'express';
+import mongoose, { Schema } from 'mongoose';
 
 /**
- * In-memory store for rate limiting
- * In production, use Redis for distributed rate limiting across multiple servers
+ * Serverless-safe rate limiting backed by MongoDB.
+ *
+ * The previous implementation used an in-process Map + setInterval, which does
+ * NOT work on serverless platforms (Vercel): each invocation gets a fresh,
+ * isolated process, so the counter never accumulates across requests and the
+ * setInterval cleanup never runs reliably. That made the limiter effectively a
+ * no-op in production.
+ *
+ * This version stores counters in a shared MongoDB collection so all
+ * invocations see the same state. Expired windows are reclaimed automatically
+ * by a TTL index (no cleanup job needed). Uses the existing Mongo connection —
+ * no extra infrastructure or credentials. For very high-throughput endpoints a
+ * dedicated store (Redis/Upstash) would be faster, but the endpoints guarded
+ * here (login, signup, password-reset, OTP) are low-volume auth flows where a
+ * single indexed upsert per request is negligible.
  */
-const rateLimitStore: Map<string, { count: number; resetTime: number }> = new Map();
+
+interface RateLimitDoc {
+  _id: string; // `${key}:${clientIp}`
+  count: number;
+  resetTime: Date;
+}
+
+const rateLimitSchema = new Schema<RateLimitDoc>(
+  {
+    _id: { type: String },
+    count: { type: Number, default: 0 },
+    resetTime: { type: Date, required: true },
+  },
+  { versionKey: false }
+);
+
+// TTL index: Mongo auto-deletes a document once its resetTime is in the past
+// (expireAfterSeconds: 0 means "expire at the resetTime value"). This replaces
+// the old setInterval-based cleanup and prevents unbounded growth.
+rateLimitSchema.index({ resetTime: 1 }, { expireAfterSeconds: 0 });
+
+// Guard against model recompilation on hot-reload / warm serverless containers.
+const RateLimitModel =
+  (mongoose.models.RateLimit as mongoose.Model<RateLimitDoc>) ||
+  mongoose.model<RateLimitDoc>('RateLimit', rateLimitSchema);
 
 /**
- * Rate limiting middleware
+ * Rate limiting middleware (fixed window).
  * @param key - Unique identifier for this rate limit rule
- * @param maxRequests - Maximum number of requests allowed
- * @param windowMs - Time window in seconds
+ * @param maxRequests - Maximum number of requests allowed per window
+ * @param windowMs - Time window in SECONDS (name kept for backwards compat)
  */
 export function rateLimitMiddleware(
   key: string,
   maxRequests: number = 5,
   windowMs: number = 60
 ) {
-  return (req: Request, res: Response, next: NextFunction) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
     try {
-      // Use IP address as identifier (X-Forwarded-For for proxied requests)
+      // Use IP address as identifier (X-Forwarded-For for proxied requests).
       const clientIp =
         (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() ||
         req.socket.remoteAddress ||
         'unknown';
 
       const rateLimitKey = `${key}:${clientIp}`;
-      const now = Date.now();
+      const now = new Date();
+      const newResetTime = new Date(now.getTime() + windowMs * 1000);
 
-      // Get current limit data
-      let limitData = rateLimitStore.get(rateLimitKey);
+      // Single atomic upsert. The aggregation-pipeline form lets us conditionally
+      // either (a) increment the count if the window is still active, or
+      // (b) start a fresh window (count = 1) if it expired / didn't exist —
+      // all in one round-trip, so concurrent invocations can't lose updates.
+      const doc = await RateLimitModel.findOneAndUpdate(
+        { _id: rateLimitKey },
+        [
+          {
+            $set: {
+              count: {
+                $cond: [
+                  { $gt: ['$resetTime', now] },
+                  { $add: [{ $ifNull: ['$count', 0] }, 1] },
+                  1,
+                ],
+              },
+              resetTime: {
+                $cond: [{ $gt: ['$resetTime', now] }, '$resetTime', newResetTime],
+              },
+            },
+          },
+        ],
+        { upsert: true, new: true }
+      ).lean();
 
-      // Reset if window has expired
-      if (!limitData || now > limitData.resetTime) {
-        limitData = {
-          count: 0,
-          resetTime: now + windowMs * 1000
-        };
-      }
+      const count = doc?.count ?? 1;
+      const resetTimeMs = doc?.resetTime
+        ? new Date(doc.resetTime).getTime()
+        : newResetTime.getTime();
 
-      // Increment request count
-      limitData.count++;
-      rateLimitStore.set(rateLimitKey, limitData);
-
-      // Set rate limit headers
+      // Set rate limit headers.
       res.setHeader('X-RateLimit-Limit', maxRequests);
-      res.setHeader('X-RateLimit-Remaining', Math.max(0, maxRequests - limitData.count));
-      res.setHeader(
-        'X-RateLimit-Reset',
-        Math.ceil(limitData.resetTime / 1000)
-      );
+      res.setHeader('X-RateLimit-Remaining', Math.max(0, maxRequests - count));
+      res.setHeader('X-RateLimit-Reset', Math.ceil(resetTimeMs / 1000));
 
-      // Check if exceeded
-      if (limitData.count > maxRequests) {
-        const retryAfter = Math.ceil((limitData.resetTime - now) / 1000);
+      // Check if exceeded.
+      if (count > maxRequests) {
+        const retryAfter = Math.max(0, Math.ceil((resetTimeMs - now.getTime()) / 1000));
         res.setHeader('Retry-After', retryAfter);
 
         res.status(429).json({
           success: false,
           message: `Too many requests. Please try again in ${retryAfter} seconds.`,
-          retryAfter
+          retryAfter,
         });
         return;
       }
 
       next();
     } catch (error) {
+      // Fail-open: if the store is briefly unavailable we prefer to serve the
+      // request rather than lock users out of auth. Errors are logged for
+      // monitoring. (Matches the previous behaviour.)
       console.error('Rate limiter error:', error);
-      next(); // Allow request to proceed on error
+      next();
     }
   };
 }
-
-/**
- * Clean up old entries from rate limit store (run periodically)
- * Call this every hour or so to prevent memory leaks
- */
-export function cleanupRateLimitStore(): void {
-  const now = Date.now();
-  let cleanedCount = 0;
-
-  for (const [key, data] of rateLimitStore.entries()) {
-    if (now > data.resetTime) {
-      rateLimitStore.delete(key);
-      cleanedCount++;
-    }
-  }
-
-  console.log(`Rate limit store cleanup: removed ${cleanedCount} entries`);
-}
-
-// Cleanup every 10 minutes
-setInterval(cleanupRateLimitStore, 10 * 60 * 1000);
 
 export default rateLimitMiddleware;
